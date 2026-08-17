@@ -154,6 +154,7 @@ export default function RecorderStudio() {
   const [audioUrl, setAudioUrl] = useState("");
   const [sessionToken, setSessionToken] = useState("");
   const [error, setError] = useState("");
+  const [starting, setStarting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [progressText, setProgressText] = useState("");
 
@@ -165,21 +166,25 @@ export default function RecorderStudio() {
   const studentNameInputRef = useRef<HTMLInputElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const classSelectRef = useRef<HTMLSelectElement | null>(null);
+  const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const waveformFrameRef = useRef<number | null>(null);
   const isEmbedded = window.self !== window.top;
 
   useEffect(() => {
     const protectOfficialAttempt = (event: BeforeUnloadEvent) => {
-      if (!(["recording", "paused", "finished"] as RecorderState[]).includes(recorderState) && !submitting) return;
+      if (!starting && !(["recording", "paused", "finished"] as RecorderState[]).includes(recorderState) && !submitting) return;
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", protectOfficialAttempt);
     return () => window.removeEventListener("beforeunload", protectOfficialAttempt);
-  }, [recorderState, submitting]);
+  }, [recorderState, starting, submitting]);
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
+    stopWaveform();
   }, []);
 
   const hasNotebook = images.length > 0 || Boolean(pdfFile);
@@ -293,7 +298,64 @@ export default function RecorderStudio() {
     if (recorderRef.current?.state !== "inactive") recorderRef.current?.stop();
   }
 
+  function stopWaveform() {
+    if (waveformFrameRef.current !== null) cancelAnimationFrame(waveformFrameRef.current);
+    waveformFrameRef.current = null;
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") void audioContextRef.current.close();
+    audioContextRef.current = null;
+  }
+
+  function startWaveform(stream: MediaStream) {
+    stopWaveform();
+    const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const canvas = waveformCanvasRef.current;
+    if (!AudioContextConstructor || !canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    try {
+      const audioContext = new AudioContextConstructor();
+      audioContextRef.current = audioContext;
+      if (audioContext.state === "suspended") void audioContext.resume().catch(() => {});
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.78;
+      audioContext.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Uint8Array(analyser.frequencyBinCount);
+
+      const draw = () => {
+        const ratio = Math.max(1, window.devicePixelRatio || 1);
+        const width = Math.max(320, canvas.clientWidth);
+        const height = Math.max(82, canvas.clientHeight);
+        if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+          canvas.width = Math.round(width * ratio);
+          canvas.height = Math.round(height * ratio);
+        }
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.clearRect(0, 0, width, height);
+        analyser.getByteFrequencyData(samples);
+        const bars = 34;
+        const gap = 4;
+        const barWidth = Math.max(3, (width - gap * (bars - 1)) / bars);
+        for (let index = 0; index < bars; index += 1) {
+          const sampleIndex = Math.floor((index / bars) * samples.length * 0.72);
+          const amplitude = Math.max(5, (samples[sampleIndex] / 255) * (height - 12));
+          const x = index * (barWidth + gap);
+          const y = (height - amplitude) / 2;
+          context.fillStyle = index % 3 === 0 ? "#7fbab0" : "#2f6661";
+          context.fillRect(x, y, barWidth, amplitude);
+        }
+        waveformFrameRef.current = requestAnimationFrame(draw);
+      };
+      draw();
+    } catch {
+      // The visualization is helpful, but it must never prevent or cancel the
+      // official recording when an older browser lacks reliable Web Audio.
+      stopWaveform();
+    }
+  }
+
   async function handleOfficialStartClick() {
+    if (starting) return;
     const currentName = (studentNameInputRef.current?.value || studentName).trim();
     const currentEmail = (emailInputRef.current?.value || email).trim().toLowerCase();
     const currentClass = classSelectRef.current?.value || className;
@@ -319,6 +381,7 @@ export default function RecorderStudio() {
       setError(!micTested ? "Em cần thử micro trước khi ghi chính thức." : "Em cần tích xác nhận đã luyện kỹ.");
       return;
     }
+    setStarting(true);
     await startOfficialRecording({ studentName: currentName, email: currentEmail, className: currentClass });
   }
 
@@ -331,6 +394,10 @@ export default function RecorderStudio() {
       }
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       const activeStream = stream;
+      // Create/resume Web Audio while this is still part of the user's mic
+      // gesture. Some iPhones suspend AudioContext if it is created only after
+      // the server round trip; the canvas remains hidden during "starting".
+      startWaveform(activeStream);
       const recorder = new MediaRecorder(activeStream, preferredAudioType() ? { mimeType: preferredAudioType() } : undefined);
       const result = await postToDrive({ action: "start", assignmentCode: ASSIGNMENT_CODE, studentName: identity.studentName, email: identity.email, className: identity.className });
       if (!result.token) {
@@ -341,12 +408,28 @@ export default function RecorderStudio() {
       recorderRef.current = recorder;
       chunksRef.current = [];
       recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onerror = () => {
+        activeStream.getTracks().forEach((track) => track.stop());
+        stopWaveform();
+        if (timerRef.current) clearInterval(timerRef.current);
+        setStarting(false);
+        setRecorderState("idle");
+        setError("Micro đã bị gián đoạn. Em hãy báo cô Trang để được kiểm tra lượt ghi.");
+      };
+      activeStream.getAudioTracks().forEach((track) => {
+        track.onended = () => {
+          if (recorder.state === "inactive") return;
+          recorder.stop();
+          setError("Micro đã bị tắt trong khi ghi. Bài ghi đã dừng tại thời điểm này.");
+        };
+      });
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         setRecorderState("finished");
         activeStream.getTracks().forEach((track) => track.stop());
+        stopWaveform();
         if (timerRef.current) clearInterval(timerRef.current);
       };
       recorder.start(1000);
@@ -354,9 +437,12 @@ export default function RecorderStudio() {
       setPart(1);
       setElapsed(0);
       setRecorderState("recording");
+      setStarting(false);
       timerRef.current = setInterval(() => setElapsed((value) => value + 1), 1000);
     } catch (cause) {
       stream?.getTracks().forEach((track) => track.stop());
+      stopWaveform();
+      setStarting(false);
       setError(cause instanceof Error ? cause.message : "Không thể bắt đầu lượt ghi âm.");
     }
   }
@@ -364,6 +450,7 @@ export default function RecorderStudio() {
   function pauseRecording() {
     if (recorderRef.current?.state !== "recording") return;
     recorderRef.current.pause();
+    stopWaveform();
     setRecorderState("paused");
     if (timerRef.current) clearInterval(timerRef.current);
   }
@@ -371,6 +458,7 @@ export default function RecorderStudio() {
   function resumeRecording() {
     if (recorderRef.current?.state !== "paused") return;
     recorderRef.current.resume();
+    if (streamRef.current) startWaveform(streamRef.current);
     setRecorderState("recording");
     timerRef.current = setInterval(() => setElapsed((value) => value + 1), 1000);
   }
@@ -430,12 +518,12 @@ export default function RecorderStudio() {
 
       <section className="warning-card"><div className="warning-number">!</div><div><h2>Luyện thật kỹ trước khi bắt đầu</h2><p>Em hãy luyện phát âm và câu trả lời nhiều lần, chuẩn bị đủ ý, chọn nơi yên tĩnh và thử micro trước. Chỉ bấm <strong>Bắt đầu bài ghi chính thức</strong> khi đã sẵn sàng, vì mỗi học sinh chỉ có đúng <strong>01 lượt</strong>.</p></div></section>
 
-      <section className="identity-card" ref={identityCardRef}><label>HỌ VÀ TÊN<input ref={studentNameInputRef} value={studentName} onChange={(event) => { setStudentName(event.target.value); setIdentityError(""); }} autoComplete="name" placeholder="Ví dụ: Nguyễn Minh Anh" disabled={recorderState !== "idle"} /></label><label>EMAIL<input ref={emailInputRef} value={email} onChange={(event) => { setEmail(event.target.value); setIdentityError(""); }} type="email" autoComplete="email" placeholder="Email Google của học sinh" disabled={recorderState !== "idle"} /></label><label>LỚP<select ref={classSelectRef} value={className} onChange={(event) => { setClassName(event.target.value); setIdentityError(""); }} disabled={recorderState !== "idle"}><option value="" disabled>Chọn lớp</option>{classes.map((item) => <option key={item}>{item}</option>)}</select></label>{identityError && <p className="identity-error">{identityError}</p>}</section>
+      <section className="identity-card" ref={identityCardRef}><label>HỌ VÀ TÊN<input ref={studentNameInputRef} value={studentName} onChange={(event) => { setStudentName(event.target.value); setIdentityError(""); }} autoComplete="name" placeholder="Ví dụ: Nguyễn Minh Anh" disabled={starting || recorderState !== "idle"} /></label><label>EMAIL<input ref={emailInputRef} value={email} onChange={(event) => { setEmail(event.target.value); setIdentityError(""); }} type="email" autoComplete="email" placeholder="Email Google của học sinh" disabled={starting || recorderState !== "idle"} /></label><label>LỚP<select ref={classSelectRef} value={className} onChange={(event) => { setClassName(event.target.value); setIdentityError(""); }} disabled={starting || recorderState !== "idle"}><option value="" disabled>Chọn lớp</option>{classes.map((item) => <option key={item}>{item}</option>)}</select></label>{identityError && <p className="identity-error">{identityError}</p>}</section>
 
       <section className="submission-grid">
         <div className="upload-panel"><p className="eyebrow">01 · VỞ CHÉP LÝ THUYẾT</p><h2>Ảnh tự ghép thành PDF</h2><p><strong>Em phải chọn ảnh đúng thứ tự trang và xoay ảnh đúng chiều trước khi nộp.</strong> Hãy chọn trang 1 trước, rồi trang 2, trang 3… Hệ thống giữ nguyên thứ tự chọn; nếu chọn nhầm, em có thể kéo hoặc dùng nút mũi tên để đổi vị trí.</p><label className="upload-drop"><input className="visually-hidden" type="file" accept="image/*,.heic,.heif,application/pdf" multiple onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ""; }} /><strong>CHỌN ẢNH HOẶC PDF</strong><span>Chọn nhiều ảnh · hoặc 01 file PDF có sẵn</span></label>{uploadError && <p className="inline-error">{uploadError}</p>}{pdfFile && <div className="pdf-chip"><span>PDF</span><div><strong>{pdfFile.name}</strong><small>{(pdfFile.size / 1024 / 1024).toFixed(1)} MB</small></div><button onClick={() => setPdfFile(null)} aria-label="Bỏ file PDF">×</button></div>}{images.length > 0 && <><div className="image-count">Đã chọn {images.length} ảnh · Thứ tự dưới đây chính là thứ tự trong PDF</div><div className="image-list">{images.map((item, index) => <div key={item.id} className="image-card" draggable onDragStart={() => setDraggedId(item.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropImage(item.id)}><div className="page-number">{index + 1}</div><img src={item.preview} style={{ transform: `rotate(${item.rotation}deg)` }} alt={`Trang ${index + 1}`} /><div className="image-actions"><button onClick={() => moveImage(item.id, -1)} disabled={index === 0} aria-label="Đưa lên">↑</button><button onClick={() => moveImage(item.id, 1)} disabled={index === images.length - 1} aria-label="Đưa xuống">↓</button><button onClick={() => rotateImage(item.id)} aria-label="Xoay ảnh">↻</button><button onClick={() => removeImage(item.id)} aria-label="Bỏ ảnh">×</button></div></div>)}</div></>}</div>
 
-        <div className="recording-panel"><p className="eyebrow">02 · BÀI GHI ÂM CHÍNH THỨC</p><div className="recording-steps"><div className={`step ${part === 1 ? "active" : "done"}`}><span>{part === 2 ? "✓" : "1"}</span><div><strong>Luyện âm</strong><p>Đọc phần âm và từ theo yêu cầu trong bài.</p></div></div><div className={`step ${part === 2 ? "active" : ""}`}><span>2</span><div><strong>Trả lời Speaking Part 1</strong><p>Nói lần lượt các câu trả lời đã chuẩn bị.</p></div></div></div><div className="studio"><div className="studio-top"><span className={`status-dot ${recorderState}`} />{statusText}</div><div className="timer">{formatTime(elapsed)}</div><p>{part === 1 ? "Nội dung đang ghi: Luyện âm." : "Nội dung đang ghi: Trả lời Speaking Part 1."} Có thể dừng tạm sau từng câu rồi ghi tiếp.</p><p className="permission-note"><strong>Bước cấp quyền micro:</strong> bấm nút dưới đây, sau đó chọn <strong>Cho phép</strong> khi trình duyệt hỏi.</p><div className="controls">{!micTesting ? <button className="secondary" onClick={startMicTest} disabled={recorderState !== "idle"}>{micTested ? "THỬ LẠI MICRO" : "CHO PHÉP & THỬ MICRO"}</button> : <button className="secondary testing" onClick={stopMicTest}>DỪNG THỬ MICRO</button>}<button className="secondary" onClick={pauseRecording} disabled={recorderState !== "recording"}>DỪNG TẠM</button><button className="secondary" onClick={resumeRecording} disabled={recorderState !== "paused"}>GHI TIẾP</button></div>{recorderState === "idle" && <><label className="confirm-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /><span>Em đã luyện kỹ, đã thử micro và hiểu rằng bài ghi chính thức chỉ có 01 lượt.</span></label><button className="primary official-start" onClick={handleOfficialStartClick}>BẮT ĐẦU BÀI GHI CHÍNH THỨC</button>{!readyToStart && <p className="start-hint">Còn thiếu: {missingStartSteps.join(" · ")}.</p>}</>}{micSampleUrl && <div className="mic-review"><strong>Nghe lại đoạn thử micro</strong><audio className="sample-player" src={micSampleUrl} controls><track kind="captions" /></audio></div>}{part === 1 && (recorderState === "recording" || recorderState === "paused") && <button className="primary" onClick={nextPart}>HOÀN TẤT PHẦN 1 · SANG PHẦN 2</button>}{part === 2 && (recorderState === "recording" || recorderState === "paused") && <button className="primary finish" onClick={finishRecording}>HOÀN TẤT BÀI GHI ÂM</button>}{audioUrl && <div className="final-audio"><strong>Nghe lại bài ghi hoàn chỉnh</strong><audio src={audioUrl} controls><track kind="captions" /></audio><small>Chỉ để kiểm tra trước khi nộp; không có nút ghi lại.</small></div>}{error && <p className="inline-error">{error}</p>}</div></div>
+        <div className="recording-panel"><p className="eyebrow">02 · BÀI GHI ÂM CHÍNH THỨC</p><div className="recording-steps"><div className={`step ${part === 1 ? "active" : "done"}`}><span>{part === 2 ? "✓" : "1"}</span><div><strong>Luyện âm</strong><p>Đọc phần âm và từ theo yêu cầu trong bài.</p></div></div><div className={`step ${part === 2 ? "active" : ""}`}><span>2</span><div><strong>Trả lời Speaking Part 1</strong><p>Nói lần lượt các câu trả lời đã chuẩn bị.</p></div></div></div><div className="studio"><div className="studio-top"><span className={`status-dot ${starting ? "starting" : recorderState}`} />{starting ? "ĐANG KẾT NỐI HỆ THỐNG" : statusText}</div><div className="timer">{formatTime(elapsed)}</div><div className={`waveform-card ${starting ? "starting" : recorderState}`} role="status" aria-live="polite"><canvas ref={waveformCanvasRef} aria-label="Sóng âm thanh đang thu" /><strong>{starting ? "Đang xác nhận lượt ghi…" : recorderState === "recording" ? "● ÂM THANH ĐANG ĐƯỢC GHI" : recorderState === "paused" ? "ĐÃ DỪNG TẠM · BẤM GHI TIẾP" : "Sóng âm sẽ hiện tại đây khi bắt đầu"}</strong></div><p>{part === 1 ? "Nội dung đang ghi: Luyện âm." : "Nội dung đang ghi: Trả lời Speaking Part 1."} Có thể dừng tạm sau từng câu rồi ghi tiếp.</p><p className="permission-note"><strong>Bước cấp quyền micro:</strong> bấm nút dưới đây, sau đó chọn <strong>Cho phép</strong> khi trình duyệt hỏi.</p><div className="controls">{!micTesting ? <button className="secondary" onClick={startMicTest} disabled={recorderState !== "idle" || starting}>{micTested ? "THỬ LẠI MICRO" : "CHO PHÉP & THỬ MICRO"}</button> : <button className="secondary testing" onClick={stopMicTest}>DỪNG THỬ MICRO</button>}<button className="secondary" onClick={pauseRecording} disabled={recorderState !== "recording"}>DỪNG TẠM</button><button className="secondary" onClick={resumeRecording} disabled={recorderState !== "paused"}>GHI TIẾP</button></div>{recorderState === "idle" && <><label className="confirm-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} disabled={starting} /><span>Em đã luyện kỹ, đã thử micro và hiểu rằng bài ghi chính thức chỉ có 01 lượt.</span></label><button className="primary official-start" onClick={handleOfficialStartClick} disabled={starting}>{starting ? "ĐANG KẾT NỐI · VUI LÒNG CHỜ…" : "BẮT ĐẦU BÀI GHI CHÍNH THỨC"}</button>{!readyToStart && !starting && <p className="start-hint">Còn thiếu: {missingStartSteps.join(" · ")}.</p>}</>}{micSampleUrl && <div className="mic-review"><strong>Nghe lại đoạn thử micro</strong><audio className="sample-player" src={micSampleUrl} controls><track kind="captions" /></audio></div>}{part === 1 && (recorderState === "recording" || recorderState === "paused") && <button className="primary" onClick={nextPart}>HOÀN TẤT PHẦN 1 · SANG PHẦN 2</button>}{part === 2 && (recorderState === "recording" || recorderState === "paused") && <button className="primary finish" onClick={finishRecording}>HOÀN TẤT BÀI GHI ÂM</button>}{audioUrl && <div className="final-audio"><strong>Nghe lại bài ghi hoàn chỉnh</strong><audio src={audioUrl} controls><track kind="captions" /></audio><small>Chỉ để kiểm tra trước khi nộp; không có nút ghi lại.</small></div>}{error && <p className="inline-error">{error}</p>}</div></div>
       </section>
 
       <section className="submit-bar"><div><span>HỒ SƠ NỘP BÀI</span><strong>{hasNotebook ? "✓ Vở chép sẵn sàng" : "○ Chưa có vở chép"} · {audioBlob ? "✓ Âm thanh sẵn sàng" : "○ Chưa ghi xong"}</strong></div><button onClick={submitWork} disabled={!canSubmit}>{submitting ? "ĐANG XỬ LÝ…" : "NỘP TOÀN BỘ BÀI S01"}</button>{progressText && <p>{progressText}</p>}</section>

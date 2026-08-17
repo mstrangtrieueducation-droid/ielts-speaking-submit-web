@@ -34,12 +34,22 @@ function startAttempt_(body) {
   try {
     const sheet = getResultSheet_();
     const values = sheet.getDataRange().getValues();
-    const duplicate = values.slice(1).some(row => clean_(row[1]).toUpperCase() === assignmentCode && clean_(row[3]).toLowerCase() === email);
-    if (duplicate) {
+    for (let i = 1; i < values.length; i += 1) {
+      const sameAttempt = clean_(values[i][1]).toUpperCase() === assignmentCode && clean_(values[i][3]).toLowerCase() === email;
+      if (!sameAttempt) continue;
+      const status = clean_(values[i][5]).toUpperCase();
+      // The first recorder deployment could save STARTED but lose its iframe
+      // response. Recover exactly that orphaned row instead of charging the
+      // student a second attempt. Submitted/active attempts stay locked.
+      if (status === "STARTED") {
+        const existingToken = clean_(values[i][6]);
+        sheet.getRange(i + 1, 6).setValue("RECORDING");
+        return { ok: true, token: existingToken, recovered: true };
+      }
       return { ok: false, code: "DUPLICATE", error: "Email này đã bắt đầu hoặc đã nộp mã bài " + assignmentCode + ". Mỗi học sinh chỉ có 01 lượt." };
     }
     const token = Utilities.getUuid();
-    sheet.appendRow([new Date(), assignmentCode, studentName, email, className, "STARTED", token, "", "", "", ""]);
+    sheet.appendRow([new Date(), assignmentCode, studentName, email, className, "RECORDING", token, "", "", "", ""]);
     return { ok: true, token: token };
   } finally {
     lock.releaseLock();
@@ -146,6 +156,9 @@ function json_(value) {
 
 function bridge_(requestId, result) {
   const message = JSON.stringify({ source: "ielts-speaking-drive", requestId: clean_(requestId), result: result }).replace(/</g, "\\u003c");
-  return HtmlService.createHtmlOutput("<!doctype html><meta charset='utf-8'><script>window.parent.postMessage(" + message + ", '*');<\\/script>")
+  // Apps Script wraps user HTML in its own sandboxed iframe. `top` reaches the
+  // original recorder page; `parent` only reaches Google's wrapper and leaves
+  // the student waiting forever.
+  return HtmlService.createHtmlOutput("<!doctype html><meta charset='utf-8'><script>window.top.postMessage(" + message + ", '*');</" + "script>")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
