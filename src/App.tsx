@@ -7,7 +7,8 @@ type ImageItem = { id: string; file: File; preview: string; rotation: number };
 type RecorderState = "idle" | "recording" | "paused" | "finished" | "submitted";
 
 const ASSIGNMENT_CODE = "S01";
-const API_BASE = (import.meta.env.VITE_APPS_SCRIPT_URL || "").trim();
+const DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTl2x9QL603pa_6jMYoJK1uQqUy8nOs8Y97OSDbwadwOaeXLjqGxHHI-5sy8jU1OXVKg/exec";
+const API_BASE = (import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL).trim();
 const LOGO_URL = `${import.meta.env.BASE_URL}logo.webp`;
 const classes = Array.from({ length: 14 }, (_, index) => `IELTS ${index + 40}`);
 
