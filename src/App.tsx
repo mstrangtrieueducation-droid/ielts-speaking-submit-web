@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PDFDocument } from "pdf-lib";
 
 type ImageItem = { id: string; file: File; preview: string; rotation: number };
@@ -161,6 +161,21 @@ export default function RecorderStudio() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isEmbedded = window.self !== window.top;
 
+  useEffect(() => {
+    const protectOfficialAttempt = (event: BeforeUnloadEvent) => {
+      if (!(["recording", "paused", "finished"] as RecorderState[]).includes(recorderState) && !submitting) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectOfficialAttempt);
+    return () => window.removeEventListener("beforeunload", protectOfficialAttempt);
+  }, [recorderState, submitting]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
   const hasNotebook = images.length > 0 || Boolean(pdfFile);
   const identityReady = studentName.trim().length >= 3 && /^\S+@\S+\.\S+$/.test(email.trim()) && Boolean(className);
   const readyToStart = identityReady && acknowledged && micTested && recorderState === "idle";
@@ -235,6 +250,9 @@ export default function RecorderStudio() {
   async function startMicTest() {
     setError("");
     try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        throw new Error("Thiết bị hoặc trình duyệt này chưa hỗ trợ ghi âm an toàn. Em hãy mở trang bằng Chrome, Edge hoặc Safari bản mới nhất.");
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       const recorder = new MediaRecorder(stream, preferredAudioType() ? { mimeType: preferredAudioType() } : undefined);
       const sample: Blob[] = [];
@@ -250,8 +268,11 @@ export default function RecorderStudio() {
       recorderRef.current = recorder;
       recorder.start(400);
       setMicTesting(true);
-    } catch {
-      setError("Không mở được micro. Em hãy cho phép trang web sử dụng micro rồi thử lại.");
+    } catch (cause) {
+      setMicTesting(false);
+      setError(cause instanceof Error && cause.message.includes("chưa hỗ trợ")
+        ? cause.message
+        : "Không mở được micro. Em hãy cho phép trang web sử dụng micro rồi thử lại.");
     }
   }
 
@@ -262,15 +283,20 @@ export default function RecorderStudio() {
   async function startOfficialRecording() {
     setError("");
     if (!readyToStart) return;
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        throw new Error("Thiết bị hoặc trình duyệt này chưa hỗ trợ ghi âm an toàn.");
+      }
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      const activeStream = stream;
+      const recorder = new MediaRecorder(activeStream, preferredAudioType() ? { mimeType: preferredAudioType() } : undefined);
       const result = await postToDrive({ action: "start", assignmentCode: ASSIGNMENT_CODE, studentName: studentName.trim(), email: email.trim().toLowerCase(), className });
       if (!result.token) {
-        stream.getTracks().forEach((track) => track.stop());
+        activeStream.getTracks().forEach((track) => track.stop());
         throw new Error(result.error || "Không thể bắt đầu lượt ghi âm.");
       }
-      const recorder = new MediaRecorder(stream, preferredAudioType() ? { mimeType: preferredAudioType() } : undefined);
-      streamRef.current = stream;
+      streamRef.current = activeStream;
       recorderRef.current = recorder;
       chunksRef.current = [];
       recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
@@ -279,7 +305,7 @@ export default function RecorderStudio() {
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         setRecorderState("finished");
-        stream.getTracks().forEach((track) => track.stop());
+        activeStream.getTracks().forEach((track) => track.stop());
         if (timerRef.current) clearInterval(timerRef.current);
       };
       recorder.start(1000);
@@ -289,6 +315,7 @@ export default function RecorderStudio() {
       setRecorderState("recording");
       timerRef.current = setInterval(() => setElapsed((value) => value + 1), 1000);
     } catch (cause) {
+      stream?.getTracks().forEach((track) => track.stop());
       setError(cause instanceof Error ? cause.message : "Không thể bắt đầu lượt ghi âm.");
     }
   }
