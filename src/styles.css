@@ -50,6 +50,8 @@ input:focus,select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(4
 .secondary,.primary { min-height:46px;border-radius:7px;font-size:12px;font-weight:800;letter-spacing:.08em; }
 .secondary { padding:0 17px;border:1px solid #bacbc6;background:#fff;color:var(--teal); }
 .primary { width:min(520px,100%);margin-top:17px;padding:0 22px;border:0;background:var(--navy);color:white;box-shadow:0 12px 24px rgba(13,23,62,.18); }
+.official-start { min-height:58px;font-size:13px; }
+.start-hint { width:min(520px,100%);margin:9px 0 0!important;color:#8a5b17!important;font-size:12px!important;font-weight:700;line-height:1.45!important; }
 .confirm-row { width:min(520px,100%);margin-top:10px;padding:15px;display:grid;grid-template-columns:18px 1fr;text-align:left;border-radius:9px;background:#fff;color:#425353;font-size:13px;font-weight:500;letter-spacing:0;line-height:1.5; }
 .confirm-row input { min-height:18px;width:18px;margin:1px 0 0;box-shadow:none; }
 .visually-hidden { position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important; }
@@ -72,6 +74,8 @@ input:focus,select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(4
 .status-dot.finished { background:#2e7a61; }
 .testing { color:#a43a35;border-color:#d49d99; }
 .sample-player,.final-audio audio { width:min(520px,100%);height:42px;margin-top:8px; }
+.mic-review { width:min(520px,100%);margin-top:16px;padding:12px 14px;display:flex;flex-direction:column;align-items:stretch;border:1px solid #d7e0dd;border-radius:9px;background:#fff;text-align:left; }
+.mic-review strong { color:var(--teal);font-size:12px; }
 .final-audio { width:min(520px,100%);margin-top:17px;padding:15px;display:flex;flex-direction:column;align-items:stretch;gap:4px;border-radius:9px;background:#fff;text-align:left; }
 .final-audio strong { color:var(--navy);font-size:13px; }
 .final-audio small { color:#73807d;font-size:11px; }
