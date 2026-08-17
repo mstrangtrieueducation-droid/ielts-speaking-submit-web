@@ -21,21 +21,47 @@ type ApiResult = {
 
 async function postToDrive(payload: Record<string, unknown>) {
   if (!API_BASE) throw new Error("Cổng nhận bài chưa được cấu hình. Em hãy báo cô Trang.");
-  const response = await fetch(API_BASE, {
-    method: "POST",
-    headers: { "content-type": "text/plain;charset=UTF-8" },
-    body: JSON.stringify(payload),
-    redirect: "follow",
+  const requestId = crypto.randomUUID();
+  return await new Promise<ApiResult>((resolve, reject) => {
+    const frameName = `drive-bridge-${requestId}`;
+    const frame = document.createElement("iframe");
+    frame.name = frameName;
+    frame.title = "Kết nối Google Drive";
+    frame.hidden = true;
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = API_BASE;
+    form.target = frameName;
+    form.acceptCharset = "UTF-8";
+    form.hidden = true;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "payload";
+    input.value = JSON.stringify({ ...payload, requestId });
+    form.appendChild(input);
+
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      window.clearTimeout(timeout);
+      frame.remove();
+      form.remove();
+    };
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { source?: string; requestId?: string; result?: ApiResult };
+      if (data?.source !== "ielts-speaking-drive" || data.requestId !== requestId || !data.result) return;
+      cleanup();
+      if (!data.result.ok) reject(new Error(data.result.error || "Chưa gửi được dữ liệu lên Google Drive."));
+      else resolve(data.result);
+    };
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Google Drive phản hồi quá chậm. Em hãy giữ nguyên trang và thử gửi lại."));
+    }, 180000);
+
+    window.addEventListener("message", onMessage);
+    document.body.append(frame, form);
+    form.submit();
   });
-  const raw = await response.text();
-  let result: ApiResult;
-  try {
-    result = JSON.parse(raw) as ApiResult;
-  } catch {
-    throw new Error("Cổng Google Drive chưa phản hồi đúng. Em hãy giữ nguyên trang và báo cô Trang.");
-  }
-  if (!response.ok || !result.ok) throw new Error(result.error || "Chưa gửi được dữ liệu lên Google Drive.");
-  return result;
 }
 
 function blobToBase64(blob: Blob) {

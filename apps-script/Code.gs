@@ -8,13 +8,15 @@ function doGet() {
 }
 
 function doPost(e) {
+  let body = {};
   try {
-    const body = JSON.parse((e && e.postData && e.postData.contents) || "{}");
-    if (body.action === "start") return json_(startAttempt_(body));
-    if (body.action === "submit") return json_(submitAttempt_(body));
-    return json_({ ok: false, code: "BAD_ACTION", error: "Yêu cầu không hợp lệ." });
+    const raw = (e && e.parameter && e.parameter.payload) || (e && e.postData && e.postData.contents) || "{}";
+    body = JSON.parse(raw);
+    if (body.action === "start") return bridge_(body.requestId, startAttempt_(body));
+    if (body.action === "submit") return bridge_(body.requestId, submitAttempt_(body));
+    return bridge_(body.requestId, { ok: false, code: "BAD_ACTION", error: "Yêu cầu không hợp lệ." });
   } catch (error) {
-    return json_({ ok: false, code: "SERVER_ERROR", error: String(error && error.message ? error.message : error) });
+    return bridge_(body.requestId, { ok: false, code: "SERVER_ERROR", error: String(error && error.message ? error.message : error) });
   }
 }
 
@@ -140,4 +142,10 @@ function clean_(value) {
 
 function json_(value) {
   return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function bridge_(requestId, result) {
+  const message = JSON.stringify({ source: "ielts-speaking-drive", requestId: clean_(requestId), result: result }).replace(/</g, "\\u003c");
+  return HtmlService.createHtmlOutput("<!doctype html><meta charset='utf-8'><script>window.parent.postMessage(" + message + ", '*');<\\/script>")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
