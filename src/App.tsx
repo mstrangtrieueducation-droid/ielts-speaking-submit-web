@@ -6,7 +6,86 @@ import { PDFDocument } from "pdf-lib";
 type ImageItem = { id: string; file: File; preview: string; rotation: number };
 type RecorderState = "idle" | "recording" | "paused" | "ready-part-2" | "finished" | "attempt-error" | "submitted";
 
-const ASSIGNMENT_CODE = "S01";
+type Assignment = {
+  code: string;
+  lessonNumber: string;
+  title: string;
+  mode: "s01" | "topic";
+};
+
+const S01_ASSIGNMENT: Assignment = {
+  code: "S01",
+  lessonNumber: "01",
+  title: "Giới thiệu tổng quan về IELTS SPEAKING PART 1",
+  mode: "s01",
+};
+
+const TOPIC_ASSIGNMENTS: Record<string, string> = {
+  S02: "Student Life & Study",
+  S03: "Neighbours & Houses",
+  S04: "Books & Sports",
+  S05: "Art & Photography",
+  S06: "Music & Films",
+  S07: "Friends & Teamwork",
+  S10: "Relaxing & Holidays",
+  S11: "Internet & Social Media",
+  S12: "Learning & Sharing",
+  S13: "Weekends & Weather",
+  S14: "Roads & Transportation",
+  S15: "Being Alone & Everyday Items",
+  S16: "Teachers & Advice",
+  S19: "Speaking PART II Introduction",
+  S20: "Speaking PART III Introduction",
+  S21: "Photography & Interesting Places",
+  S22: "Attractive Locations & Opinions",
+  S23: "Interesting Job & Science Subjects",
+  S24: "Role Models & Good Friends",
+  S25: "Achievements & Foreign Countries",
+  S26: "Films & Historical Periods",
+  S27: "Computer Problems & Important Rules",
+  S28: "Learning Skills & Important Plants",
+  S31: "Disliking Others & Long Journeys",
+  S32: "Culture & Peaceful Places",
+  S33: "Special Days & Family Members",
+  S34: "Competitions & Crowded Places",
+  S35: "Children & Interesting People",
+  S36: "Cooking & Service",
+  S37: "Difficult Tasks & Teaching Others",
+  S38: "Intelligence & Adventures",
+};
+
+const RESERVED_ASSIGNMENTS: Record<string, string> = {
+  S08: "Buổi ôn tập giữa khóa 1 không yêu cầu nộp bài ghi âm trên hệ thống.",
+  S09: "Buổi kiểm tra Nói lần 1 không nhận bài tại phòng ghi âm này.",
+  S17: "Buổi ôn tập cuối khóa 1 không yêu cầu nộp bài ghi âm trên hệ thống.",
+  S18: "Buổi kiểm tra Nói lần 2 không nhận bài tại phòng ghi âm này.",
+  S29: "Buổi ôn tập giữa khóa 2 không yêu cầu nộp bài ghi âm trên hệ thống.",
+  S30: "Buổi kiểm tra Nói lần 3 không nhận bài tại phòng ghi âm này.",
+  S39: "Buổi ôn tập cuối khóa 2 không yêu cầu nộp bài ghi âm trên hệ thống.",
+  S40: "Buổi kiểm tra Nói lần 4 không nhận bài tại phòng ghi âm này.",
+};
+
+function resolveAssignment() {
+  const requestedCode = (new URLSearchParams(window.location.search).get("code") || "S01").trim().toUpperCase();
+  if (requestedCode === "S01") return { kind: "active" as const, assignment: S01_ASSIGNMENT };
+  const topicTitle = TOPIC_ASSIGNMENTS[requestedCode];
+  if (topicTitle) {
+    return {
+      kind: "active" as const,
+      assignment: {
+        code: requestedCode,
+        lessonNumber: requestedCode.slice(1),
+        title: topicTitle,
+        mode: "topic" as const,
+      },
+    };
+  }
+  if (RESERVED_ASSIGNMENTS[requestedCode]) {
+    return { kind: "reserved" as const, code: requestedCode, message: RESERVED_ASSIGNMENTS[requestedCode] };
+  }
+  return { kind: "invalid" as const, code: requestedCode };
+}
+
 const DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTl2x9QL603pa_6jMYoJK1uQqUy8nOs8Y97OSDbwadwOaeXLjqGxHHI-5sy8jU1OXVKg/exec";
 const API_BASE = (import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL).trim();
 const LOGO_URL = `${import.meta.env.BASE_URL}logo.webp`;
@@ -116,7 +195,7 @@ async function normalizeImage(file: File, rotation: number) {
   return await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Không thể tạo ảnh PDF.")), "image/jpeg", 0.9));
 }
 
-async function imagesToPdf(items: ImageItem[]) {
+async function imagesToPdf(items: ImageItem[], assignmentCode: string) {
   const document = await PDFDocument.create();
   const pageWidth = 595.28;
   const pageHeight = 841.89;
@@ -132,10 +211,13 @@ async function imagesToPdf(items: ImageItem[]) {
   }
   const bytes = await document.save();
   const pdfBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  return new File([pdfBuffer], `${ASSIGNMENT_CODE}-vo-chep.pdf`, { type: "application/pdf" });
+  return new File([pdfBuffer], `${assignmentCode}-vo-chep.pdf`, { type: "application/pdf" });
 }
 
 export default function RecorderStudio() {
+  const assignmentResolution = useMemo(resolveAssignment, []);
+  const assignment = assignmentResolution.kind === "active" ? assignmentResolution.assignment : S01_ASSIGNMENT;
+  const isS01 = assignment.mode === "s01";
   const [studentName, setStudentName] = useState("");
   const [email, setEmail] = useState("");
   const [className, setClassName] = useState("");
@@ -176,6 +258,12 @@ export default function RecorderStudio() {
   const isEmbedded = window.self !== window.top;
 
   useEffect(() => {
+    document.title = assignmentResolution.kind === "active"
+      ? `${assignment.code} · ${assignment.title} · IELTS Speaking`
+      : `${assignmentResolution.code || "Mã bài"} · Không nhận bài`;
+  }, [assignment.code, assignment.title, assignmentResolution]);
+
+  useEffect(() => {
     const protectOfficialAttempt = (event: BeforeUnloadEvent) => {
       if (!starting && !(["recording", "paused", "ready-part-2", "finished", "attempt-error"] as RecorderState[]).includes(recorderState) && !submitting) return;
       event.preventDefault();
@@ -206,7 +294,10 @@ export default function RecorderStudio() {
   const hasNotebook = images.length > 0 || Boolean(pdfFile);
   const identityReady = studentName.trim().length >= 3 && /^\S+@\S+\.\S+$/.test(email.trim()) && Boolean(className);
   const readyToStart = identityReady && acknowledged && micTested && recorderState === "idle";
-  const canSubmit = recorderState === "finished" && Boolean(part1AudioBlob) && Boolean(part2AudioBlob) && hasNotebook && !submitting;
+  const canSubmit = recorderState === "finished"
+    && Boolean(part1AudioBlob)
+    && (isS01 ? Boolean(part2AudioBlob) && hasNotebook : true)
+    && !submitting;
   const missingStartSteps = [
     studentName.trim().length < 3 ? "họ và tên" : "",
     !/^\S+@\S+\.\S+$/.test(email.trim()) ? "email hợp lệ" : "",
@@ -215,7 +306,15 @@ export default function RecorderStudio() {
     !acknowledged ? "tích xác nhận đã luyện kỹ" : "",
   ].filter(Boolean);
 
-  const statusText = useMemo(() => ({ idle: "CHƯA BẮT ĐẦU", recording: "ĐANG GHI", paused: "ĐANG DỪNG TẠM", "ready-part-2": "PHẦN 1 ĐÃ LƯU", finished: "ĐÃ GHI XONG 2 PHẦN", "attempt-error": "CẦN CÔ KIỂM TRA LƯỢT GHI", submitted: "ĐÃ NỘP BÀI" }[recorderState]), [recorderState]);
+  const statusText = useMemo(() => ({
+    idle: "CHƯA BẮT ĐẦU",
+    recording: "ĐANG GHI",
+    paused: "ĐANG DỪNG TẠM",
+    "ready-part-2": "PHẦN 1 ĐÃ LƯU",
+    finished: isS01 ? "ĐÃ GHI XONG 2 PHẦN" : "ĐÃ GHI XONG",
+    "attempt-error": "CẦN CÔ KIỂM TRA LƯỢT GHI",
+    submitted: "ĐÃ NỘP BÀI",
+  }[recorderState]), [isS01, recorderState]);
 
   function openStandaloneRecorder() {
     const target = new URL(window.location.href);
@@ -417,7 +516,7 @@ export default function RecorderStudio() {
       const recorder = new MediaRecorder(activeStream, preferredAudioType() ? { mimeType: preferredAudioType() } : undefined);
       if (segment === 1) {
         if (!identity) throw new Error("Thiếu thông tin học sinh để bắt đầu lượt ghi âm.");
-        const result = await postToDrive({ action: "start", assignmentCode: ASSIGNMENT_CODE, studentName: identity.studentName, email: identity.email, className: identity.className });
+        const result = await postToDrive({ action: "start", assignmentCode: assignment.code, studentName: identity.studentName, email: identity.email, className: identity.className });
         if (!result.token) {
           activeStream.getTracks().forEach((track) => track.stop());
           throw new Error(result.error || "Không thể bắt đầu lượt ghi âm.");
@@ -446,7 +545,9 @@ export default function RecorderStudio() {
           segmentFailedRef.current = true;
           recorder.stop();
           setError(segment === 1
-            ? "Micro đã bị tắt khi đang ghi Phần 1. Phần này không được tính là đã hoàn tất; em hãy báo cô Trang để kiểm tra lượt ghi."
+            ? isS01
+              ? "Micro đã bị tắt khi đang ghi Phần 1. Phần này không được tính là đã hoàn tất; em hãy báo cô Trang để kiểm tra lượt ghi."
+              : "Micro đã bị tắt khi đang ghi bài. Bài ghi chưa được tính là hoàn tất; em hãy báo cô Trang để kiểm tra lượt ghi."
             : "Micro đã bị tắt khi đang ghi Phần 2. Phần 1 vẫn được giữ; em có thể mở lại micro và bắt đầu lại Phần 2.");
         };
       });
@@ -464,9 +565,13 @@ export default function RecorderStudio() {
           if (part1AudioUrl) URL.revokeObjectURL(part1AudioUrl);
           setPart1AudioBlob(blob);
           setPart1AudioUrl(URL.createObjectURL(blob));
-          setPart(2);
           setElapsed(0);
-          setRecorderState("ready-part-2");
+          if (isS01) {
+            setPart(2);
+            setRecorderState("ready-part-2");
+          } else {
+            setRecorderState("finished");
+          }
         } else {
           if (part2AudioUrl) URL.revokeObjectURL(part2AudioUrl);
           setPart2AudioBlob(blob);
@@ -522,17 +627,35 @@ export default function RecorderStudio() {
   }
 
   async function submitWork() {
-    if (!canSubmit || !part1AudioBlob || !part2AudioBlob) return;
+    if (!canSubmit || !part1AudioBlob || (isS01 && !part2AudioBlob)) return;
     setSubmitting(true);
     setError("");
     try {
+      if (!isS01) {
+        if (part1AudioBlob.size > 25 * 1024 * 1024) {
+          throw new Error("Bản ghi âm vượt 25 MB. Em hãy báo cô Trang để được hỗ trợ.");
+        }
+        setProgressText(`Đang chuyển bản ghi ${assignment.code} vào Google Drive của cô Trang…`);
+        const audioBase64 = await blobToBase64(part1AudioBlob);
+        await postToDrive({
+          action: "submit",
+          token: sessionToken,
+          assignmentCode: assignment.code,
+          audioBase64,
+          audioType: part1AudioBlob.type || "audio/webm",
+        });
+        setRecorderState("submitted");
+        setProgressText("");
+        return;
+      }
+
       setProgressText(images.length ? `Đang ghép ${images.length} ảnh thành PDF theo đúng thứ tự…` : "Đang kiểm tra file PDF…");
-      const notebook = pdfFile || await imagesToPdf(images);
-      if (notebook.size + part1AudioBlob.size + part2AudioBlob.size > 25 * 1024 * 1024) {
+      const notebook = pdfFile || await imagesToPdf(images, assignment.code);
+      if (notebook.size + part1AudioBlob.size + part2AudioBlob!.size > 25 * 1024 * 1024) {
         throw new Error("Tổng dung lượng PDF và hai phần ghi âm vượt 25 MB. Em hãy giảm dung lượng ảnh rồi thử lại.");
       }
       setProgressText("Đang chuyển PDF và hai phần ghi âm vào Google Drive của cô Trang…");
-      const [notebookBase64, audioPart1Base64, audioPart2Base64] = await Promise.all([blobToBase64(notebook), blobToBase64(part1AudioBlob), blobToBase64(part2AudioBlob)]);
+      const [notebookBase64, audioPart1Base64, audioPart2Base64] = await Promise.all([blobToBase64(notebook), blobToBase64(part1AudioBlob), blobToBase64(part2AudioBlob!)]);
       await postToDrive({
         action: "submit",
         token: sessionToken,
@@ -541,7 +664,7 @@ export default function RecorderStudio() {
         audioPart1Base64,
         audioPart1Type: part1AudioBlob.type || "audio/webm",
         audioPart2Base64,
-        audioPart2Type: part2AudioBlob.type || "audio/webm",
+        audioPart2Type: part2AudioBlob!.type || "audio/webm",
       });
       setRecorderState("submitted");
       setProgressText("");
@@ -552,59 +675,111 @@ export default function RecorderStudio() {
     }
   }
 
+  if (assignmentResolution.kind !== "active") {
+    const isReserved = assignmentResolution.kind === "reserved";
+    return (
+      <main className="blocked-screen">
+        <section className="blocked-card">
+          <img src={LOGO_URL} alt="Ms. Trang Trieu Education" />
+          <p className="eyebrow">IELTS SPEAKING · {assignmentResolution.code || "MÃ BÀI"}</p>
+          <h1>{isReserved ? "Buổi này không nhận bài" : "Mã bài không hợp lệ"}</h1>
+          <p>{isReserved ? assignmentResolution.message : "Đường dẫn này không có mã bài IELTS Speaking hợp lệ. Em hãy mở lại đúng nút nộp bài trong trang học của mình."}</p>
+          <small>Không bắt đầu ghi âm tại trang này. Nếu cần hỗ trợ, em hãy báo cô Trang.</small>
+        </section>
+      </main>
+    );
+  }
+
   if (isEmbedded) {
-    return <main className="launch-screen"><section className="launch-card"><img src={LOGO_URL} alt="Ms. Trang Trieu Education" /><p className="eyebrow">IELTS SPEAKING · BUỔI 01 · MÃ S01</p><h1>Phòng ghi âm<br />IELTS Speaking</h1><p>Em hãy bấm nút bên dưới để vào phòng ghi âm.</p><ol><li>Chọn <strong>Cho phép</strong> khi trình duyệt hỏi quyền sử dụng micro.</li><li>Thử micro và chuẩn bị đủ PDF vở chép.</li><li>Chỉ bắt đầu bài ghi chính thức khi em đã sẵn sàng.</li></ol><button className="launch-button" onClick={openStandaloneRecorder}>VÀO PHÒNG GHI ÂM</button><small>Mã bài S01 đã được điền sẵn.</small>{error && <p className="inline-error">{error}</p>}</section></main>;
+    return (
+      <main className="launch-screen">
+        <section className="launch-card">
+          <img src={LOGO_URL} alt="Ms. Trang Trieu Education" />
+          <p className="eyebrow">IELTS SPEAKING · BUỔI {assignment.lessonNumber} · MÃ {assignment.code}</p>
+          <h1>Phòng ghi âm<br />IELTS Speaking</h1>
+          <p>Em hãy bấm nút bên dưới để vào phòng ghi âm của bài <strong>{assignment.title}</strong>.</p>
+          <ol>
+            <li>Chọn <strong>Cho phép</strong> khi trình duyệt hỏi quyền sử dụng micro.</li>
+            <li>{isS01 ? "Thử micro và chuẩn bị đủ PDF vở chép." : "Luyện kỹ toàn bộ nội dung trước khi bắt đầu."}</li>
+            <li>Chỉ bắt đầu bài ghi chính thức khi em đã sẵn sàng.</li>
+          </ol>
+          <button className="launch-button" onClick={openStandaloneRecorder}>VÀO PHÒNG GHI ÂM</button>
+          <small>Mã bài {assignment.code} đã được điền sẵn.</small>
+          {error && <p className="inline-error">{error}</p>}
+        </section>
+      </main>
+    );
   }
 
   if (recorderState === "submitted") {
-    return <main className="success-screen"><img src={LOGO_URL} alt="Ms. Trang Trieu Education" /><p className="eyebrow">MÃ BÀI · {ASSIGNMENT_CODE}</p><h1>Đã nộp bài thành công</h1><p>Hệ thống đã nhận 01 file PDF vở chép và 02 file ghi âm riêng của <strong>{studentName}</strong>.</p><div className="success-mark">✓</div><small>Em không cần nộp lại lần thứ hai.</small></main>;
+    return (
+      <main className="success-screen">
+        <img src={LOGO_URL} alt="Ms. Trang Trieu Education" />
+        <p className="eyebrow">MÃ BÀI · {assignment.code}</p>
+        <h1>Đã nộp bài thành công</h1>
+        <p>{isS01
+          ? <>Hệ thống đã nhận 01 file PDF vở chép và 02 file ghi âm riêng của <strong>{studentName}</strong>.</>
+          : <>Hệ thống đã nhận bản ghi <strong>{assignment.title}</strong> của <strong>{studentName}</strong>.</>}</p>
+        <div className="success-mark">✓</div>
+        <small>Em không cần nộp lại lần thứ hai.</small>
+      </main>
+    );
   }
 
   return (
     <main className="recorder-shell">
-      <header className="brandbar"><img src={LOGO_URL} alt="Ms. Trang Trieu Education" /><div><strong>MS. TRANG TRIEU EDUCATION</strong><span>IELTS SPEAKING · BUỔI 01</span></div><div className="code-pill">MÃ BÀI · {ASSIGNMENT_CODE}</div></header>
-      <section className="hero"><div><p className="eyebrow">NỘP BÀI BUỔI HỌC NÓI SỐ 01</p><h1>Vở chép & bài ghi âm<br />IELTS Speaking Part 1</h1><p className="lead">Ảnh vở được tự ghép thành một PDF. Phần 1 và Phần 2 được ghi thành hai tệp riêng, sau đó nộp cùng một lần.</p></div><div className="attempt-card"><span>01</span><strong>LƯỢT LÀM DUY NHẤT</strong><p>Mỗi phần được dừng tạm và ghi tiếp; phần đã hoàn tất không được ghi lại.</p></div></section>
+      <header className="brandbar"><img src={LOGO_URL} alt="Ms. Trang Trieu Education" /><div><strong>MS. TRANG TRIEU EDUCATION</strong><span>IELTS SPEAKING · BUỔI {assignment.lessonNumber}</span></div><div className="code-pill">MÃ BÀI · {assignment.code}</div></header>
+      <section className="hero">
+        <div>
+          <p className="eyebrow">NỘP BÀI BUỔI HỌC NÓI SỐ {assignment.lessonNumber}</p>
+          {isS01
+            ? <><h1>Vở chép & bài ghi âm<br />IELTS Speaking Part 1</h1><p className="lead">Ảnh vở được tự ghép thành một PDF. Phần 1 và Phần 2 được ghi thành hai tệp riêng, sau đó nộp cùng một lần.</p></>
+            : <><h1>{assignment.title}</h1><p className="lead">Ghi và nộp 01 bản nói hoàn chỉnh cho đúng mã bài {assignment.code}. Em có thể dừng tạm sau từng câu rồi ghi tiếp trong cùng lượt.</p></>}
+        </div>
+        <div className="attempt-card"><span>01</span><strong>LƯỢT LÀM DUY NHẤT</strong><p>{isS01 ? "Mỗi phần được dừng tạm và ghi tiếp; phần đã hoàn tất không được ghi lại." : "Bản ghi được dừng tạm và ghi tiếp; sau khi hoàn tất sẽ không có nút ghi lại."}</p></div>
+      </section>
 
-      <section className="warning-card"><div className="warning-number">!</div><div><h2>Luyện thật kỹ trước khi bắt đầu</h2><p>Em hãy luyện phát âm và câu trả lời nhiều lần, chuẩn bị đủ ý, chọn nơi yên tĩnh và thử micro trước. Chỉ bấm <strong>Bắt đầu bài ghi chính thức</strong> khi đã sẵn sàng, vì mỗi học sinh chỉ có đúng <strong>01 lượt</strong>.</p></div></section>
+      <section className="warning-card"><div className="warning-number">!</div><div><h2>Luyện thật kỹ trước khi bắt đầu</h2><p>Em hãy luyện phát âm và câu trả lời nhiều lần, chuẩn bị đủ ý, chọn nơi yên tĩnh và thử micro trước. Chỉ bấm <strong>Bắt đầu bài ghi chính thức</strong> khi đã sẵn sàng, vì mỗi học sinh chỉ có đúng <strong>01 lượt cho mã {assignment.code}</strong>.</p></div></section>
 
       <section className="identity-card" ref={identityCardRef}><label>HỌ VÀ TÊN<input ref={studentNameInputRef} value={studentName} onChange={(event) => { setStudentName(event.target.value); setIdentityError(""); }} autoComplete="name" placeholder="Ví dụ: Nguyễn Minh Anh" disabled={starting || recorderState !== "idle"} /></label><label>EMAIL<input ref={emailInputRef} value={email} onChange={(event) => { setEmail(event.target.value); setIdentityError(""); }} type="email" autoComplete="email" placeholder="Email Google của học sinh" disabled={starting || recorderState !== "idle"} /></label><label>LỚP<select ref={classSelectRef} value={className} onChange={(event) => { setClassName(event.target.value); setIdentityError(""); }} disabled={starting || recorderState !== "idle"}><option value="" disabled>Chọn lớp</option>{classes.map((item) => <option key={item}>{item}</option>)}</select></label>{identityError && <p className="identity-error">{identityError}</p>}</section>
 
-      <section className="submission-grid">
-        <div className="upload-panel"><p className="eyebrow">01 · VỞ CHÉP LÝ THUYẾT</p><h2>Ảnh tự ghép thành PDF</h2><p><strong>Em phải chọn ảnh đúng thứ tự trang và xoay ảnh đúng chiều trước khi nộp.</strong> Hãy chọn trang 1 trước, rồi trang 2, trang 3… Hệ thống giữ nguyên thứ tự chọn; nếu chọn nhầm, em có thể kéo hoặc dùng nút mũi tên để đổi vị trí.</p><label className="upload-drop"><input className="visually-hidden" type="file" accept="image/*,.heic,.heif,application/pdf" multiple onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ""; }} /><strong>CHỌN ẢNH HOẶC PDF</strong><span>Chọn nhiều ảnh · hoặc 01 file PDF có sẵn</span></label>{uploadError && <p className="inline-error">{uploadError}</p>}{pdfFile && <div className="pdf-chip"><span>PDF</span><div><strong>{pdfFile.name}</strong><small>{(pdfFile.size / 1024 / 1024).toFixed(1)} MB</small></div><button onClick={() => setPdfFile(null)} aria-label="Bỏ file PDF">×</button></div>}{images.length > 0 && <><div className="image-count">Đã chọn {images.length} ảnh · Thứ tự dưới đây chính là thứ tự trong PDF</div><div className="image-list">{images.map((item, index) => <div key={item.id} className="image-card" draggable onDragStart={() => setDraggedId(item.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropImage(item.id)}><div className="page-number">{index + 1}</div><img src={item.preview} style={{ transform: `rotate(${item.rotation}deg)` }} alt={`Trang ${index + 1}`} /><div className="image-actions"><button onClick={() => moveImage(item.id, -1)} disabled={index === 0} aria-label="Đưa lên">↑</button><button onClick={() => moveImage(item.id, 1)} disabled={index === images.length - 1} aria-label="Đưa xuống">↓</button><button onClick={() => rotateImage(item.id)} aria-label="Xoay ảnh">↻</button><button onClick={() => removeImage(item.id)} aria-label="Bỏ ảnh">×</button></div></div>)}</div></>}</div>
+      <section className={`submission-grid ${isS01 ? "" : "generic-grid"}`}>
+        {isS01 && <div className="upload-panel"><p className="eyebrow">01 · VỞ CHÉP LÝ THUYẾT</p><h2>Ảnh tự ghép thành PDF</h2><p><strong>Em phải chọn ảnh đúng thứ tự trang và xoay ảnh đúng chiều trước khi nộp.</strong> Hãy chọn trang 1 trước, rồi trang 2, trang 3… Hệ thống giữ nguyên thứ tự chọn; nếu chọn nhầm, em có thể kéo hoặc dùng nút mũi tên để đổi vị trí.</p><label className="upload-drop"><input className="visually-hidden" type="file" accept="image/*,.heic,.heif,application/pdf" multiple onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ""; }} /><strong>CHỌN ẢNH HOẶC PDF</strong><span>Chọn nhiều ảnh · hoặc 01 file PDF có sẵn</span></label>{uploadError && <p className="inline-error">{uploadError}</p>}{pdfFile && <div className="pdf-chip"><span>PDF</span><div><strong>{pdfFile.name}</strong><small>{(pdfFile.size / 1024 / 1024).toFixed(1)} MB</small></div><button onClick={() => setPdfFile(null)} aria-label="Bỏ file PDF">×</button></div>}{images.length > 0 && <><div className="image-count">Đã chọn {images.length} ảnh · Thứ tự dưới đây chính là thứ tự trong PDF</div><div className="image-list">{images.map((item, index) => <div key={item.id} className="image-card" draggable onDragStart={() => setDraggedId(item.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropImage(item.id)}><div className="page-number">{index + 1}</div><img src={item.preview} style={{ transform: `rotate(${item.rotation}deg)` }} alt={`Trang ${index + 1}`} /><div className="image-actions"><button onClick={() => moveImage(item.id, -1)} disabled={index === 0} aria-label="Đưa lên">↑</button><button onClick={() => moveImage(item.id, 1)} disabled={index === images.length - 1} aria-label="Đưa xuống">↓</button><button onClick={() => rotateImage(item.id)} aria-label="Xoay ảnh">↻</button><button onClick={() => removeImage(item.id)} aria-label="Bỏ ảnh">×</button></div></div>)}</div></>}</div>}
 
         <div className="recording-panel">
-          <p className="eyebrow">02 · BÀI GHI ÂM CHÍNH THỨC</p>
-          <div className="recording-steps">
-            <div className={`step ${part === 1 ? "active" : "done"}`}><span>{part === 2 ? "✓" : "1"}</span><div><strong>Phần 1 · Luyện âm</strong><p>Đọc phần âm và từ theo yêu cầu trong bài.</p></div></div>
-            <div className={`step ${part === 2 ? "active" : ""}`}><span>2</span><div><strong>Phần 2 · Speaking Part 1</strong><p>Nói lần lượt các câu trả lời đã chuẩn bị.</p></div></div>
+          <p className="eyebrow">{isS01 ? "02" : "01"} · BÀI GHI ÂM CHÍNH THỨC</p>
+          <div className={`recording-steps ${isS01 ? "" : "single-recording-step"}`}>
+            {isS01
+              ? <><div className={`step ${part === 1 ? "active" : "done"}`}><span>{part === 2 ? "✓" : "1"}</span><div><strong>Phần 1 · Luyện âm</strong><p>Đọc phần âm và từ theo yêu cầu trong bài.</p></div></div><div className={`step ${part === 2 ? "active" : ""}`}><span>2</span><div><strong>Phần 2 · Speaking Part 1</strong><p>Nói lần lượt các câu trả lời đã chuẩn bị.</p></div></div></>
+              : <div className="step active"><span>{part1AudioBlob ? "✓" : "1"}</span><div><strong>{assignment.title}</strong><p>Nói lần lượt toàn bộ nội dung đã chuẩn bị cho bài này.</p></div></div>}
           </div>
           <div className="studio">
-            <div className="studio-top"><span className={`status-dot ${starting ? "starting" : recorderState}`} />{starting ? "ĐANG MỞ MICRO CHO PHẦN NÀY" : statusText}</div>
+            <div className="studio-top"><span className={`status-dot ${starting ? "starting" : recorderState}`} />{starting ? (isS01 ? "ĐANG MỞ MICRO CHO PHẦN NÀY" : "ĐANG MỞ MICRO CHO BÀI GHI") : statusText}</div>
             <div className="timer">{formatTime(elapsed)}</div>
             <div className={`waveform-card ${starting ? "starting" : recorderState}`} role="status" aria-live="polite">
               <canvas ref={waveformCanvasRef} aria-label="Sóng âm thanh đang thu" />
-              <strong>{starting ? "Đang chuẩn bị bản ghi mới…" : recorderState === "recording" ? "● ÂM THANH ĐANG ĐƯỢC GHI" : recorderState === "paused" ? "ĐÃ DỪNG TẠM · BẤM GHI TIẾP" : recorderState === "ready-part-2" ? "PHẦN 1 ĐÃ LƯU · BẮT ĐẦU BẢN GHI PHẦN 2" : recorderState === "finished" ? "ĐÃ LƯU ĐỦ HAI BẢN GHI" : "Sóng âm sẽ hiện tại đây khi bắt đầu"}</strong>
+              <strong>{starting ? "Đang chuẩn bị bản ghi mới…" : recorderState === "recording" ? "● ÂM THANH ĐANG ĐƯỢC GHI" : recorderState === "paused" ? "ĐÃ DỪNG TẠM · BẤM GHI TIẾP" : recorderState === "ready-part-2" ? "PHẦN 1 ĐÃ LƯU · BẮT ĐẦU BẢN GHI PHẦN 2" : recorderState === "finished" ? (isS01 ? "ĐÃ LƯU ĐỦ HAI BẢN GHI" : "ĐÃ LƯU BẢN GHI") : "Sóng âm sẽ hiện tại đây khi bắt đầu"}</strong>
             </div>
-            <p>{part === 1 ? "Nội dung đang ghi: Phần 1 · Luyện âm." : "Nội dung đang ghi: Phần 2 · Trả lời Speaking Part 1."} Có thể dừng tạm sau từng câu rồi ghi tiếp.</p>
+            <p>{isS01 ? (part === 1 ? "Nội dung đang ghi: Phần 1 · Luyện âm." : "Nội dung đang ghi: Phần 2 · Trả lời Speaking Part 1.") : `Nội dung đang ghi: ${assignment.title}.`} Có thể dừng tạm sau từng câu rồi ghi tiếp.</p>
             {(recorderState === "idle" || recorderState === "ready-part-2") && <p className="permission-note"><strong>Bước cấp quyền micro:</strong> bấm nút bắt đầu của phần tương ứng, sau đó chọn <strong>Cho phép</strong> nếu trình duyệt hỏi.</p>}
             <div className="controls">
               {part === 1 && recorderState === "idle" && (!micTesting ? <button className="secondary" onClick={startMicTest} disabled={starting}>{micTested ? "THỬ LẠI MICRO" : "CHO PHÉP & THỬ MICRO"}</button> : <button className="secondary testing" onClick={stopMicTest}>DỪNG THỬ MICRO</button>)}
               <button className="secondary" onClick={pauseRecording} disabled={recorderState !== "recording"}>DỪNG TẠM</button>
               <button className="secondary" onClick={resumeRecording} disabled={recorderState !== "paused"}>GHI TIẾP</button>
             </div>
-            {recorderState === "idle" && <><label className="confirm-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} disabled={starting} /><span>Em đã luyện kỹ, đã thử micro và hiểu rằng mỗi phần chỉ được ghi chính thức 01 lần.</span></label><button className="primary official-start" onClick={handleOfficialStartClick} disabled={starting}>{starting ? "ĐANG KẾT NỐI · VUI LÒNG CHỜ…" : "BẮT ĐẦU GHI PHẦN 1"}</button>{!readyToStart && !starting && <p className="start-hint">Còn thiếu: {missingStartSteps.join(" · ")}.</p>}</>}
-            {part === 2 && recorderState === "ready-part-2" && <button className="primary official-start" onClick={startPart2Recording} disabled={starting}>{starting ? "ĐANG MỞ MICRO · VUI LÒNG CHỜ…" : "BẮT ĐẦU GHI PHẦN 2"}</button>}
+            {recorderState === "idle" && <><label className="confirm-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} disabled={starting} /><span>{isS01 ? "Em đã luyện kỹ, đã thử micro và hiểu rằng mỗi phần chỉ được ghi chính thức 01 lần." : `Em đã luyện kỹ, đã thử micro và hiểu rằng mã bài ${assignment.code} chỉ được ghi chính thức 01 lần.`}</span></label><button className="primary official-start" onClick={handleOfficialStartClick} disabled={starting}>{starting ? "ĐANG KẾT NỐI · VUI LÒNG CHỜ…" : (isS01 ? "BẮT ĐẦU GHI PHẦN 1" : "BẮT ĐẦU BÀI GHI CHÍNH THỨC")}</button>{!readyToStart && !starting && <p className="start-hint">Còn thiếu: {missingStartSteps.join(" · ")}.</p>}</>}
+            {isS01 && part === 2 && recorderState === "ready-part-2" && <button className="primary official-start" onClick={startPart2Recording} disabled={starting}>{starting ? "ĐANG MỞ MICRO · VUI LÒNG CHỜ…" : "BẮT ĐẦU GHI PHẦN 2"}</button>}
             {micSampleUrl && <div className="mic-review"><strong>Nghe lại đoạn thử micro</strong><audio className="sample-player" src={micSampleUrl} controls><track kind="captions" /></audio></div>}
-            {part === 1 && (recorderState === "recording" || recorderState === "paused") && <button className="primary" onClick={finishPart1Recording}>HOÀN TẤT & LƯU PHẦN 1</button>}
-            {part === 2 && (recorderState === "recording" || recorderState === "paused") && <button className="primary finish" onClick={finishRecording}>HOÀN TẤT & LƯU PHẦN 2</button>}
-            {part1AudioUrl && <div className="final-audio"><strong>Bản ghi Phần 1 · Luyện âm</strong><audio src={part1AudioUrl} controls><track kind="captions" /></audio><small>Phần 1 đã khóa; không có nút ghi lại.</small></div>}
-            {part2AudioUrl && <div className="final-audio"><strong>Bản ghi Phần 2 · Speaking Part 1</strong><audio src={part2AudioUrl} controls><track kind="captions" /></audio><small>Phần 2 đã khóa; không có nút ghi lại.</small></div>}
+            {part === 1 && (recorderState === "recording" || recorderState === "paused") && <button className="primary" onClick={finishPart1Recording}>{isS01 ? "HOÀN TẤT & LƯU PHẦN 1" : "HOÀN TẤT & LƯU BẢN GHI"}</button>}
+            {isS01 && part === 2 && (recorderState === "recording" || recorderState === "paused") && <button className="primary finish" onClick={finishRecording}>HOÀN TẤT & LƯU PHẦN 2</button>}
+            {part1AudioUrl && <div className="final-audio"><strong>{isS01 ? "Bản ghi Phần 1 · Luyện âm" : `Bản ghi · ${assignment.title}`}</strong><audio src={part1AudioUrl} controls><track kind="captions" /></audio><small>{isS01 ? "Phần 1 đã khóa; không có nút ghi lại." : "Bản ghi đã khóa; không có nút ghi lại."}</small></div>}
+            {isS01 && part2AudioUrl && <div className="final-audio"><strong>Bản ghi Phần 2 · Speaking Part 1</strong><audio src={part2AudioUrl} controls><track kind="captions" /></audio><small>Phần 2 đã khóa; không có nút ghi lại.</small></div>}
             {error && <p className="inline-error">{error}</p>}
           </div>
         </div>
       </section>
 
-      <section className="submit-bar"><div><span>HỒ SƠ NỘP BÀI</span><strong>{hasNotebook ? "✓ Vở chép sẵn sàng" : "○ Chưa có vở chép"} · {part1AudioBlob ? "✓ Phần 1" : "○ Phần 1"} · {part2AudioBlob ? "✓ Phần 2" : "○ Phần 2"}</strong></div><button onClick={submitWork} disabled={!canSubmit}>{submitting ? "ĐANG XỬ LÝ…" : "NỘP PDF + 02 BẢN GHI S01"}</button>{progressText && <p>{progressText}</p>}</section>
+      <section className="submit-bar"><div><span>HỒ SƠ NỘP BÀI · {assignment.code}</span><strong>{isS01 ? <>{hasNotebook ? "✓ Vở chép sẵn sàng" : "○ Chưa có vở chép"} · {part1AudioBlob ? "✓ Phần 1" : "○ Phần 1"} · {part2AudioBlob ? "✓ Phần 2" : "○ Phần 2"}</> : <>{part1AudioBlob ? "✓ Bản ghi sẵn sàng" : "○ Chưa có bản ghi"}</>}</strong></div><button onClick={submitWork} disabled={!canSubmit}>{submitting ? "ĐANG XỬ LÝ…" : (isS01 ? "NỘP PDF + 02 BẢN GHI S01" : `NỘP BẢN GHI ${assignment.code}`)}</button>{progressText && <p>{progressText}</p>}</section>
     </main>
   );
 }
