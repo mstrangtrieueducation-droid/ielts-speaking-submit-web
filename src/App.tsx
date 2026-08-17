@@ -553,7 +553,7 @@ export default function RecorderStudio() {
   }
 
   if (isEmbedded) {
-    return <main className="launch-screen"><section className="launch-card"><img src={LOGO_URL} alt="Ms. Trang Trieu Education" /><p className="eyebrow">IELTS SPEAKING · BUỔI 01 · MÃ S01</p><h1>Mở phòng ghi âm<br />toàn màn hình</h1><p>Google Sites không thể trực tiếp xin quyền micro cho trang được nhúng. Em hãy mở phòng ghi âm ở cửa sổ riêng; tại đó trình duyệt sẽ hỏi quyền sử dụng micro.</p><ol><li>Bấm nút bên dưới.</li><li>Khi trình duyệt hỏi quyền micro, chọn <strong>Cho phép</strong>.</li><li>Thử micro, chuẩn bị đủ PDF vở chép rồi mới bắt đầu lượt ghi chính thức.</li></ol><button className="launch-button" onClick={openStandaloneRecorder}>MỞ PHÒNG GHI ÂM</button><small>Trang nộp bài vẫn dùng mã S01 và gửi PDF, audio về Google Drive của cô Trang.</small>{error && <p className="inline-error">{error}</p>}</section></main>;
+    return <main className="launch-screen"><section className="launch-card"><img src={LOGO_URL} alt="Ms. Trang Trieu Education" /><p className="eyebrow">IELTS SPEAKING · BUỔI 01 · MÃ S01</p><h1>Phòng ghi âm<br />IELTS Speaking</h1><p>Em hãy bấm nút bên dưới để vào phòng ghi âm.</p><ol><li>Chọn <strong>Cho phép</strong> khi trình duyệt hỏi quyền sử dụng micro.</li><li>Thử micro và chuẩn bị đủ PDF vở chép.</li><li>Chỉ bắt đầu bài ghi chính thức khi em đã sẵn sàng.</li></ol><button className="launch-button" onClick={openStandaloneRecorder}>VÀO PHÒNG GHI ÂM</button><small>Mã bài S01 đã được điền sẵn.</small>{error && <p className="inline-error">{error}</p>}</section></main>;
   }
 
   if (recorderState === "submitted") {
