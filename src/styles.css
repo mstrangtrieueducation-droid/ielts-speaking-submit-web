@@ -82,6 +82,15 @@ input:focus,select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(4
 .submit-bar strong { font-size:14px; }
 .submit-bar button { min-height:48px;padding:0 22px;border:1px solid rgba(255,255,255,.3);border-radius:7px;background:#fff;color:var(--navy);font-size:12px;font-weight:800; }
 .submit-bar>p { grid-column:1/-1;margin:0;color:#dce7e5;font-size:12px; }
+.launch-screen { min-height:100vh;padding:28px;display:grid;place-items:center;background:radial-gradient(circle at 80% 10%,rgba(70,132,120,.35),transparent 34%),linear-gradient(135deg,#0c163b,#163b50); }
+.launch-card { width:min(720px,100%);padding:42px;border:1px solid rgba(255,255,255,.2);border-radius:22px;background:#fff;box-shadow:0 30px 80px rgba(2,9,31,.35); }
+.launch-card img { width:64px;height:64px;object-fit:contain;margin-bottom:24px; }
+.launch-card h1 { margin:0;color:var(--navy);font:750 clamp(40px,7vw,66px)/1.05 "Segoe UI",Arial,Helvetica,sans-serif;letter-spacing:-.025em; }
+.launch-card>p:not(.eyebrow) { margin:22px 0 0;color:#52625f;font-size:16px;line-height:1.65; }
+.launch-card ol { margin:24px 0;padding-left:23px;color:#334441;line-height:1.75; }
+.launch-button { width:100%;min-height:58px;border:0;border-radius:9px;background:var(--navy);color:#fff;font-size:14px;font-weight:850;letter-spacing:.08em;box-shadow:0 14px 28px rgba(13,23,62,.22); }
+.launch-card small { display:block;margin-top:16px;color:#71807d;line-height:1.5;text-align:center; }
+.permission-note { width:min(520px,100%);margin:7px 0 0!important;padding:11px 13px;border-radius:8px;background:#fff9e7;color:#66501c!important; }
 .success-screen { min-height:100vh;padding:50px 20px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:linear-gradient(145deg,#f8f7f2,#e8f2ee); }
 .success-screen img { width:74px;height:74px;object-fit:contain;margin-bottom:24px; }
 .success-screen h1 { margin:0;font:750 clamp(40px,6vw,70px)/1.1 "Segoe UI",Arial,Helvetica,sans-serif;letter-spacing:-.015em;color:var(--navy); }
@@ -90,6 +99,8 @@ input:focus,select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(4
 .success-screen small { color:#687472; }
 @keyframes pulse { 50% { opacity:.55; } }
 @media (max-width:760px) {
+  .launch-screen { padding:12px; }
+  .launch-card { padding:28px 22px; }
   .brandbar { padding:11px 15px; }
   .brandbar strong { font-size:11px; }
   .brandbar span { font-size:9px; }
