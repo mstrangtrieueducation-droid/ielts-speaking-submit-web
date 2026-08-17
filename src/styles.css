@@ -53,6 +53,11 @@ input:focus,select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(4
 .waveform-card.recording strong { color:#a72f2a; }
 .waveform-card.paused canvas { opacity:.24; }
 .waveform-card.paused strong { color:#9a6a1f; }
+.waveform-card.ready-part-2 canvas,.waveform-card.finished canvas { opacity:.18; }
+.waveform-card.ready-part-2 strong { color:var(--teal); }
+.waveform-card.attempt-error { border-color:#d8a9a5;background:#fff5f4; }
+.waveform-card.attempt-error canvas { opacity:.14; }
+.waveform-card.attempt-error strong { color:#9b302a; }
 .waveform-card.starting { position:relative;min-height:96px;background:#fffdf7; }
 .waveform-card.starting canvas { display:none; }
 .waveform-card.starting::before { content:"";width:42px;height:42px;border:4px solid #d9e5e1;border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite; }
@@ -83,7 +88,9 @@ input:focus,select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(4
 .status-dot.recording { background:#d43b35;box-shadow:0 0 0 5px rgba(212,59,53,.12);animation:pulse 1.1s infinite; }
 .status-dot.starting { background:#2f6661;box-shadow:0 0 0 5px rgba(47,102,97,.12);animation:pulse .9s infinite; }
 .status-dot.paused { background:#d29e32; }
+.status-dot.ready-part-2 { background:#2e7a61; }
 .status-dot.finished { background:#2e7a61; }
+.status-dot.attempt-error { background:#a43131; }
 .testing { color:#a43a35;border-color:#d49d99; }
 .sample-player,.final-audio audio { width:min(520px,100%);height:42px;margin-top:8px; }
 .mic-review { width:min(520px,100%);margin-top:16px;padding:12px 14px;display:flex;flex-direction:column;align-items:stretch;border:1px solid #d7e0dd;border-radius:9px;background:#fff;text-align:left; }

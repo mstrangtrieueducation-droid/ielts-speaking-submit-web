@@ -41,15 +41,15 @@ function startAttempt_(body) {
       // The first recorder deployment could save STARTED but lose its iframe
       // response. Recover exactly that orphaned row instead of charging the
       // student a second attempt. Submitted/active attempts stay locked.
-      if (status === "STARTED") {
+      if (status === "STARTED" || status === "RECORDING") {
         const existingToken = clean_(values[i][6]);
-        sheet.getRange(i + 1, 6).setValue("RECORDING");
+        sheet.getRange(i + 1, 6).setValue("RECORDING_V3");
         return { ok: true, token: existingToken, recovered: true };
       }
       return { ok: false, code: "DUPLICATE", error: "Email này đã bắt đầu hoặc đã nộp mã bài " + assignmentCode + ". Mỗi học sinh chỉ có 01 lượt." };
     }
     const token = Utilities.getUuid();
-    sheet.appendRow([new Date(), assignmentCode, studentName, email, className, "RECORDING", token, "", "", "", ""]);
+    sheet.appendRow([new Date(), assignmentCode, studentName, email, className, "RECORDING_V3", token, "", "", "", "", "", ""]);
     return { ok: true, token: token };
   } finally {
     lock.releaseLock();
@@ -59,15 +59,19 @@ function startAttempt_(body) {
 function submitAttempt_(body) {
   const token = clean_(body.token);
   const notebookBase64 = clean_(body.notebookBase64);
-  const audioBase64 = clean_(body.audioBase64);
-  if (!token || !notebookBase64 || !audioBase64) {
-    return { ok: false, code: "MISSING_FILES", error: "Bài nộp chưa đủ PDF và file ghi âm." };
+  const legacyAudioBase64 = clean_(body.audioBase64);
+  const audioPart1Base64 = clean_(body.audioPart1Base64) || legacyAudioBase64;
+  const audioPart2Base64 = clean_(body.audioPart2Base64);
+  const legacySubmission = Boolean(legacyAudioBase64) && !audioPart2Base64;
+  if (!token || !notebookBase64 || !audioPart1Base64 || (!legacySubmission && !audioPart2Base64)) {
+    return { ok: false, code: "MISSING_FILES", error: "Bài nộp chưa đủ PDF và hai phần ghi âm." };
   }
 
   const notebookBytes = Utilities.base64Decode(notebookBase64);
-  const audioBytes = Utilities.base64Decode(audioBase64);
-  if (notebookBytes.length + audioBytes.length > MAX_COMBINED_BYTES) {
-    return { ok: false, code: "TOO_LARGE", error: "Tổng dung lượng PDF và ghi âm vượt 25 MB. Em hãy giảm dung lượng ảnh rồi thử lại." };
+  const audioPart1Bytes = Utilities.base64Decode(audioPart1Base64);
+  const audioPart2Bytes = audioPart2Base64 ? Utilities.base64Decode(audioPart2Base64) : [];
+  if (notebookBytes.length + audioPart1Bytes.length + audioPart2Bytes.length > MAX_COMBINED_BYTES) {
+    return { ok: false, code: "TOO_LARGE", error: "Tổng dung lượng PDF và hai phần ghi âm vượt 25 MB. Em hãy giảm dung lượng ảnh rồi thử lại." };
   }
 
   const lock = LockService.getScriptLock();
@@ -88,14 +92,27 @@ function submitAttempt_(body) {
     const studentName = clean_(sheet.getRange(targetRow, 3).getValue());
     const safeBase = safeName_(assignmentCode + " - " + studentName);
     const folder = getSubmissionFolder_();
-    const notebook = folder.createFile(Utilities.newBlob(notebookBytes, body.notebookType || "application/pdf", safeBase + " - VỞ CHÉP.pdf"));
-    const audioExt = audioExtension_(body.audioType);
-    const audio = folder.createFile(Utilities.newBlob(audioBytes, body.audioType || "audio/webm", safeBase + " - BÀI GHI ÂM." + audioExt));
+    let notebook;
+    let audioPart1;
+    let audioPart2;
+    try {
+      notebook = folder.createFile(Utilities.newBlob(notebookBytes, body.notebookType || "application/pdf", safeBase + " - VỞ CHÉP.pdf"));
+      const part1Type = body.audioPart1Type || body.audioType || "audio/webm";
+      audioPart1 = folder.createFile(Utilities.newBlob(audioPart1Bytes, part1Type, safeBase + (legacySubmission ? " - BÀI GHI ÂM." : " - PHẦN 1 - LUYỆN ÂM.") + audioExtension_(part1Type)));
+      if (audioPart2Bytes.length) {
+        const part2Type = body.audioPart2Type || "audio/webm";
+        audioPart2 = folder.createFile(Utilities.newBlob(audioPart2Bytes, part2Type, safeBase + " - PHẦN 2 - SPEAKING PART 1." + audioExtension_(part2Type)));
+      }
 
-    sheet.getRange(targetRow, 1).setValue(new Date());
-    sheet.getRange(targetRow, 6).setValue("SUBMITTED");
-    sheet.getRange(targetRow, 8, 1, 4).setValues([[notebook.getName(), notebook.getUrl(), audio.getName(), audio.getUrl()]]);
-    return { ok: true, notebookUrl: notebook.getUrl(), audioUrl: audio.getUrl() };
+      sheet.getRange(targetRow, 8, 1, 6).setValues([[notebook.getName(), notebook.getUrl(), audioPart1.getName(), audioPart1.getUrl(), audioPart2 ? audioPart2.getName() : "", audioPart2 ? audioPart2.getUrl() : ""]]);
+      sheet.getRange(targetRow, 1).setValue(new Date());
+      sheet.getRange(targetRow, 6).setValue("SUBMITTED");
+      return { ok: true, notebookUrl: notebook.getUrl(), audioPart1Url: audioPart1.getUrl(), audioPart2Url: audioPart2 ? audioPart2.getUrl() : "" };
+    } catch (error) {
+      try { sheet.getRange(targetRow, 8, 1, 6).clearContent(); } catch (cleanupError) {}
+      [notebook, audioPart1, audioPart2].forEach(file => { if (file) { try { file.setTrashed(true); } catch (cleanupError) {} } });
+      throw error;
+    }
   } finally {
     lock.releaseLock();
   }
@@ -128,10 +145,11 @@ function getResultSheet_() {
     props.setProperty("RESULT_SHEET_ID", spreadsheet.getId());
   }
   const sheet = spreadsheet.getSheets()[0];
+  const headers = ["Thời gian", "Mã bài", "Họ và tên", "Email", "Lớp", "Trạng thái", "Mã lượt", "Tên PDF", "Link PDF", "Tên ghi âm Phần 1", "Link ghi âm Phần 1", "Tên ghi âm Phần 2", "Link ghi âm Phần 2"];
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["Thời gian", "Mã bài", "Họ và tên", "Email", "Lớp", "Trạng thái", "Mã lượt", "Tên PDF", "Link PDF", "Tên ghi âm", "Link ghi âm"]);
-    sheet.setFrozenRows(1);
-  }
+    sheet.appendRow(headers);
+  } else sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
   return sheet;
 }
 
