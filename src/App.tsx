@@ -137,6 +137,7 @@ export default function RecorderStudio() {
   const [studentName, setStudentName] = useState("");
   const [email, setEmail] = useState("");
   const [className, setClassName] = useState("");
+  const [identityError, setIdentityError] = useState("");
   const [images, setImages] = useState<ImageItem[]>([]);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
@@ -159,6 +160,10 @@ export default function RecorderStudio() {
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const identityCardRef = useRef<HTMLElement | null>(null);
+  const studentNameInputRef = useRef<HTMLInputElement | null>(null);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const classSelectRef = useRef<HTMLSelectElement | null>(null);
   const isEmbedded = window.self !== window.top;
 
   useEffect(() => {
@@ -181,7 +186,9 @@ export default function RecorderStudio() {
   const readyToStart = identityReady && acknowledged && micTested && recorderState === "idle";
   const canSubmit = recorderState === "finished" && Boolean(audioBlob) && hasNotebook && !submitting;
   const missingStartSteps = [
-    !identityReady ? "điền đủ họ tên, email và lớp" : "",
+    studentName.trim().length < 3 ? "họ và tên" : "",
+    !/^\S+@\S+\.\S+$/.test(email.trim()) ? "email hợp lệ" : "",
+    !className ? "lớp" : "",
     !micTested ? "thử micro" : "",
     !acknowledged ? "tích xác nhận đã luyện kỹ" : "",
   ].filter(Boolean);
@@ -285,9 +292,37 @@ export default function RecorderStudio() {
     if (recorderRef.current?.state !== "inactive") recorderRef.current?.stop();
   }
 
-  async function startOfficialRecording() {
+  async function handleOfficialStartClick() {
+    const currentName = (studentNameInputRef.current?.value || studentName).trim();
+    const currentEmail = (emailInputRef.current?.value || email).trim().toLowerCase();
+    const currentClass = classSelectRef.current?.value || className;
+    setStudentName(currentName);
+    setEmail(currentEmail);
+    setClassName(currentClass);
+
+    const missingIdentity = [
+      currentName.length < 3 ? "họ và tên" : "",
+      !/^\S+@\S+\.\S+$/.test(currentEmail) ? "email hợp lệ" : "",
+      !currentClass ? "lớp" : "",
+    ].filter(Boolean);
+    if (missingIdentity.length) {
+      setIdentityError(`Em cần kiểm tra lại: ${missingIdentity.join(", ")}.`);
+      identityCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (currentName.length < 3) studentNameInputRef.current?.focus();
+      else if (!/^\S+@\S+\.\S+$/.test(currentEmail)) emailInputRef.current?.focus();
+      else classSelectRef.current?.focus();
+      return;
+    }
+    setIdentityError("");
+    if (!micTested || !acknowledged) {
+      setError(!micTested ? "Em cần thử micro trước khi ghi chính thức." : "Em cần tích xác nhận đã luyện kỹ.");
+      return;
+    }
+    await startOfficialRecording({ studentName: currentName, email: currentEmail, className: currentClass });
+  }
+
+  async function startOfficialRecording(identity: { studentName: string; email: string; className: string }) {
     setError("");
-    if (!readyToStart) return;
     let stream: MediaStream | null = null;
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
@@ -296,7 +331,7 @@ export default function RecorderStudio() {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       const activeStream = stream;
       const recorder = new MediaRecorder(activeStream, preferredAudioType() ? { mimeType: preferredAudioType() } : undefined);
-      const result = await postToDrive({ action: "start", assignmentCode: ASSIGNMENT_CODE, studentName: studentName.trim(), email: email.trim().toLowerCase(), className });
+      const result = await postToDrive({ action: "start", assignmentCode: ASSIGNMENT_CODE, studentName: identity.studentName, email: identity.email, className: identity.className });
       if (!result.token) {
         activeStream.getTracks().forEach((track) => track.stop());
         throw new Error(result.error || "Không thể bắt đầu lượt ghi âm.");
@@ -394,12 +429,12 @@ export default function RecorderStudio() {
 
       <section className="warning-card"><div className="warning-number">!</div><div><h2>Luyện thật kỹ trước khi bắt đầu</h2><p>Em hãy luyện phát âm và câu trả lời nhiều lần, chuẩn bị đủ ý, chọn nơi yên tĩnh và thử micro trước. Chỉ bấm <strong>Bắt đầu bài ghi chính thức</strong> khi đã sẵn sàng, vì mỗi học sinh chỉ có đúng <strong>01 lượt</strong>.</p></div></section>
 
-      <section className="identity-card"><label>HỌ VÀ TÊN<input value={studentName} onChange={(event) => setStudentName(event.target.value)} placeholder="Ví dụ: Nguyễn Minh Anh" disabled={recorderState !== "idle"} /></label><label>EMAIL<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email Google của học sinh" disabled={recorderState !== "idle"} /></label><label>LỚP<select value={className} onChange={(event) => setClassName(event.target.value)} disabled={recorderState !== "idle"}><option value="" disabled>Chọn lớp</option>{classes.map((item) => <option key={item}>{item}</option>)}</select></label></section>
+      <section className="identity-card" ref={identityCardRef}><label>HỌ VÀ TÊN<input ref={studentNameInputRef} value={studentName} onChange={(event) => { setStudentName(event.target.value); setIdentityError(""); }} autoComplete="name" placeholder="Ví dụ: Nguyễn Minh Anh" disabled={recorderState !== "idle"} /></label><label>EMAIL<input ref={emailInputRef} value={email} onChange={(event) => { setEmail(event.target.value); setIdentityError(""); }} type="email" autoComplete="email" placeholder="Email Google của học sinh" disabled={recorderState !== "idle"} /></label><label>LỚP<select ref={classSelectRef} value={className} onChange={(event) => { setClassName(event.target.value); setIdentityError(""); }} disabled={recorderState !== "idle"}><option value="" disabled>Chọn lớp</option>{classes.map((item) => <option key={item}>{item}</option>)}</select></label>{identityError && <p className="identity-error">{identityError}</p>}</section>
 
       <section className="submission-grid">
         <div className="upload-panel"><p className="eyebrow">01 · VỞ CHÉP LÝ THUYẾT</p><h2>Ảnh tự ghép thành PDF</h2><p><strong>Em phải chọn ảnh đúng thứ tự trang và xoay ảnh đúng chiều trước khi nộp.</strong> Hãy chọn trang 1 trước, rồi trang 2, trang 3… Hệ thống giữ nguyên thứ tự chọn; nếu chọn nhầm, em có thể kéo hoặc dùng nút mũi tên để đổi vị trí.</p><label className="upload-drop"><input className="visually-hidden" type="file" accept="image/*,.heic,.heif,application/pdf" multiple onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ""; }} /><strong>CHỌN ẢNH HOẶC PDF</strong><span>Chọn nhiều ảnh · hoặc 01 file PDF có sẵn</span></label>{uploadError && <p className="inline-error">{uploadError}</p>}{pdfFile && <div className="pdf-chip"><span>PDF</span><div><strong>{pdfFile.name}</strong><small>{(pdfFile.size / 1024 / 1024).toFixed(1)} MB</small></div><button onClick={() => setPdfFile(null)} aria-label="Bỏ file PDF">×</button></div>}{images.length > 0 && <><div className="image-count">Đã chọn {images.length} ảnh · Thứ tự dưới đây chính là thứ tự trong PDF</div><div className="image-list">{images.map((item, index) => <div key={item.id} className="image-card" draggable onDragStart={() => setDraggedId(item.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropImage(item.id)}><div className="page-number">{index + 1}</div><img src={item.preview} style={{ transform: `rotate(${item.rotation}deg)` }} alt={`Trang ${index + 1}`} /><div className="image-actions"><button onClick={() => moveImage(item.id, -1)} disabled={index === 0} aria-label="Đưa lên">↑</button><button onClick={() => moveImage(item.id, 1)} disabled={index === images.length - 1} aria-label="Đưa xuống">↓</button><button onClick={() => rotateImage(item.id)} aria-label="Xoay ảnh">↻</button><button onClick={() => removeImage(item.id)} aria-label="Bỏ ảnh">×</button></div></div>)}</div></>}</div>
 
-        <div className="recording-panel"><p className="eyebrow">02 · BÀI GHI ÂM CHÍNH THỨC</p><div className="recording-steps"><div className={`step ${part === 1 ? "active" : "done"}`}><span>{part === 2 ? "✓" : "1"}</span><div><strong>Luyện âm</strong><p>Đọc phần âm và từ theo yêu cầu trong bài.</p></div></div><div className={`step ${part === 2 ? "active" : ""}`}><span>2</span><div><strong>Trả lời Speaking Part 1</strong><p>Nói lần lượt các câu trả lời đã chuẩn bị.</p></div></div></div><div className="studio"><div className="studio-top"><span className={`status-dot ${recorderState}`} />{statusText}</div><div className="timer">{formatTime(elapsed)}</div><p>{part === 1 ? "Nội dung đang ghi: Luyện âm." : "Nội dung đang ghi: Trả lời Speaking Part 1."} Có thể dừng tạm sau từng câu rồi ghi tiếp.</p><p className="permission-note"><strong>Bước cấp quyền micro:</strong> bấm nút dưới đây, sau đó chọn <strong>Cho phép</strong> khi trình duyệt hỏi.</p><div className="controls">{!micTesting ? <button className="secondary" onClick={startMicTest} disabled={recorderState !== "idle"}>{micTested ? "THỬ LẠI MICRO" : "CHO PHÉP & THỬ MICRO"}</button> : <button className="secondary testing" onClick={stopMicTest}>DỪNG THỬ MICRO</button>}<button className="secondary" onClick={pauseRecording} disabled={recorderState !== "recording"}>DỪNG TẠM</button><button className="secondary" onClick={resumeRecording} disabled={recorderState !== "paused"}>GHI TIẾP</button></div>{recorderState === "idle" && <><label className="confirm-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /><span>Em đã luyện kỹ, đã thử micro và hiểu rằng bài ghi chính thức chỉ có 01 lượt.</span></label><button className="primary official-start" onClick={startOfficialRecording} disabled={!readyToStart}>BẮT ĐẦU BÀI GHI CHÍNH THỨC</button>{!readyToStart && <p className="start-hint">Còn thiếu: {missingStartSteps.join(" · ")}.</p>}</>}{micSampleUrl && <div className="mic-review"><strong>Nghe lại đoạn thử micro</strong><audio className="sample-player" src={micSampleUrl} controls><track kind="captions" /></audio></div>}{part === 1 && (recorderState === "recording" || recorderState === "paused") && <button className="primary" onClick={nextPart}>HOÀN TẤT PHẦN 1 · SANG PHẦN 2</button>}{part === 2 && (recorderState === "recording" || recorderState === "paused") && <button className="primary finish" onClick={finishRecording}>HOÀN TẤT BÀI GHI ÂM</button>}{audioUrl && <div className="final-audio"><strong>Nghe lại bài ghi hoàn chỉnh</strong><audio src={audioUrl} controls><track kind="captions" /></audio><small>Chỉ để kiểm tra trước khi nộp; không có nút ghi lại.</small></div>}{error && <p className="inline-error">{error}</p>}</div></div>
+        <div className="recording-panel"><p className="eyebrow">02 · BÀI GHI ÂM CHÍNH THỨC</p><div className="recording-steps"><div className={`step ${part === 1 ? "active" : "done"}`}><span>{part === 2 ? "✓" : "1"}</span><div><strong>Luyện âm</strong><p>Đọc phần âm và từ theo yêu cầu trong bài.</p></div></div><div className={`step ${part === 2 ? "active" : ""}`}><span>2</span><div><strong>Trả lời Speaking Part 1</strong><p>Nói lần lượt các câu trả lời đã chuẩn bị.</p></div></div></div><div className="studio"><div className="studio-top"><span className={`status-dot ${recorderState}`} />{statusText}</div><div className="timer">{formatTime(elapsed)}</div><p>{part === 1 ? "Nội dung đang ghi: Luyện âm." : "Nội dung đang ghi: Trả lời Speaking Part 1."} Có thể dừng tạm sau từng câu rồi ghi tiếp.</p><p className="permission-note"><strong>Bước cấp quyền micro:</strong> bấm nút dưới đây, sau đó chọn <strong>Cho phép</strong> khi trình duyệt hỏi.</p><div className="controls">{!micTesting ? <button className="secondary" onClick={startMicTest} disabled={recorderState !== "idle"}>{micTested ? "THỬ LẠI MICRO" : "CHO PHÉP & THỬ MICRO"}</button> : <button className="secondary testing" onClick={stopMicTest}>DỪNG THỬ MICRO</button>}<button className="secondary" onClick={pauseRecording} disabled={recorderState !== "recording"}>DỪNG TẠM</button><button className="secondary" onClick={resumeRecording} disabled={recorderState !== "paused"}>GHI TIẾP</button></div>{recorderState === "idle" && <><label className="confirm-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /><span>Em đã luyện kỹ, đã thử micro và hiểu rằng bài ghi chính thức chỉ có 01 lượt.</span></label><button className="primary official-start" onClick={handleOfficialStartClick}>BẮT ĐẦU BÀI GHI CHÍNH THỨC</button>{!readyToStart && <p className="start-hint">Còn thiếu: {missingStartSteps.join(" · ")}.</p>}</>}{micSampleUrl && <div className="mic-review"><strong>Nghe lại đoạn thử micro</strong><audio className="sample-player" src={micSampleUrl} controls><track kind="captions" /></audio></div>}{part === 1 && (recorderState === "recording" || recorderState === "paused") && <button className="primary" onClick={nextPart}>HOÀN TẤT PHẦN 1 · SANG PHẦN 2</button>}{part === 2 && (recorderState === "recording" || recorderState === "paused") && <button className="primary finish" onClick={finishRecording}>HOÀN TẤT BÀI GHI ÂM</button>}{audioUrl && <div className="final-audio"><strong>Nghe lại bài ghi hoàn chỉnh</strong><audio src={audioUrl} controls><track kind="captions" /></audio><small>Chỉ để kiểm tra trước khi nộp; không có nút ghi lại.</small></div>}{error && <p className="inline-error">{error}</p>}</div></div>
       </section>
 
       <section className="submit-bar"><div><span>HỒ SƠ NỘP BÀI</span><strong>{hasNotebook ? "✓ Vở chép sẵn sàng" : "○ Chưa có vở chép"} · {audioBlob ? "✓ Âm thanh sẵn sàng" : "○ Chưa ghi xong"}</strong></div><button onClick={submitWork} disabled={!canSubmit}>{submitting ? "ĐANG XỬ LÝ…" : "NỘP TOÀN BỘ BÀI S01"}</button>{progressText && <p>{progressText}</p>}</section>

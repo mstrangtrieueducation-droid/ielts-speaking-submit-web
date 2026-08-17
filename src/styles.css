@@ -26,6 +26,7 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .warning-card h2,.upload-panel h2 { margin:0 0 9px; font:750 26px/1.25 "Segoe UI",Arial,Helvetica,sans-serif; letter-spacing:-.01em; color:var(--navy); }
 .warning-card p,.upload-panel>p { margin:0; line-height:1.65; font-size:15px; }
 .identity-card { margin:18px 44px; padding:22px; display:grid; grid-template-columns:1.2fr 1.2fr .7fr; gap:16px; background:#fff; border:1px solid #d9e2df; border-radius:15px; }
+.identity-error { grid-column:1/-1;margin:0;padding:10px 12px;border-radius:7px;background:#fff0ef;color:#9b302a;font-size:13px;line-height:1.45; }
 label { display:flex; flex-direction:column; gap:8px; font-size:11px; font-weight:800; letter-spacing:.11em; color:var(--teal); }
 input,select { width:100%; min-height:48px; padding:0 14px; border:1px solid #cbd7d3; border-radius:8px; background:#fbfcfa; color:var(--ink); font-size:15px; letter-spacing:0; outline:none; }
 input:focus,select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(47,102,97,.12); }
